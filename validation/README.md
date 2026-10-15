@@ -29,8 +29,10 @@ make_workload.py ──► workload.jsonl ──► replay.py ──► measured
 | `e2_llama2_70b_tp4_a100_draft7b_k4` | Draft-model cost and draft memory accounting. | 4 A100 |
 
 Llama-2 is used because Vidur ships A100 profiles for both 7B and 70B, so no
-profiling is needed to start. Sapelo2's A100s are 80 GB, matching Vidur's
-`a100` profile.
+profiling is needed to start. Sapelo2's A100s are 80 GB like the GPUs behind
+Vidur's `a100` profile, but form factor and power limit also move kernel
+times; `environment.txt` records the power limit, and e0 measures the
+combined effect.
 
 ## Steps
 

@@ -441,7 +441,7 @@ class SpeculativeDecodingConfig:
     Each decode step verifies up to ``num_speculative_tokens`` proposed tokens
     in one target forward pass, then keeps the accepted prefix plus one token
     sampled by the target. ``num_speculative_tokens=0`` disables the feature
-    and leaves every code path identical to upstream Vidur.
+    and leaves simulation results identical to upstream Vidur.
 
     See docs/speculative_decoding.md for the modeling assumptions.
     """
@@ -618,7 +618,7 @@ class ReplicaConfig:
         if self.speculative_decoding_config.enabled and self.num_pipeline_stages > 1:
             raise ValueError(
                 "Speculative decoding is modeled for num_pipeline_stages=1 only "
-                "(vLLM does not combine it with pipeline parallelism)."
+                "(vLLM lists the two as not composable)."
             )
         self.world_size = self.num_pipeline_stages * self.tensor_parallel_size
         self.model_config: BaseModelConfig = BaseModelConfig.create_from_name(

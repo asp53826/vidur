@@ -1,9 +1,11 @@
 # Speculative decoding in Vidur
 
 This branch adds speculative decoding to Vidur's simulation of a vLLM v1-style
-engine. With `num_speculative_tokens=0` (the default) every code path is the
-upstream one, and a full simulation produces a byte-identical
-`request_metrics.csv` to upstream (checked against commit `abae7f6`).
+engine. With `num_speculative_tokens=0` (the default) it behaves exactly like
+upstream: a full simulation writes a byte-identical `request_metrics.csv`
+(checked against commit `abae7f6` by `scripts/check_matches_upstream.sh`).
+One deliberate difference: decode-attention lookups past the profiled batch
+size, which raised `KeyError` upstream, now extrapolate linearly.
 
 ```bash
 python -m vidur.main \
@@ -109,8 +111,8 @@ Two caveats on reading the numbers:
 - 6 req/s is past this replica's capacity even without speculation: the
   simulated baseline's median TTFT climbs from 0.15 s in the first quarter of
   requests to 5.5 s in the last. Ratios there depend on run length and show
-  direction only. The 3 req/s rows are steady state (TTFT flat across the run
-  for every configuration listed).
+  direction only. The 3 req/s row is steady state (median TTFT stays flat
+  across the run under both bounds).
 
 ## Calibrating acceptance from vLLM
 
@@ -129,8 +131,8 @@ counters for a run and converts them:
 
 ## Known limitations
 
-- **Draft length is always k.** vLLM's n-gram proposer can return fewer than
-  k tokens when the match is near the end of the context. vLLM exports the
+- **A step proposes k tokens or none.** vLLM's n-gram proposer can return
+  fewer than k tokens when the match is near the end of the context. vLLM exports the
   mean draft length; the report prints it so the gap is visible. Shorter
   drafts mean the simulator over-charges verify cost.
 - **Short drafts fold into acceptance.** vLLM's per-position counters can't
@@ -141,8 +143,8 @@ counters for a run and converts them:
   vLLM's draft-model proposer feeds the accepted tokens, which differ step to
   step.
 - **Sarathi scheduler only, pipeline parallelism 1.** Other schedulers refuse
-  a speculative config instead of ignoring it, and vLLM does not combine
-  speculative decoding with pipeline parallelism.
+  a speculative config instead of ignoring it. vLLM's docs list speculative
+  decoding and pipeline parallelism as not composable (as of 0.15).
 - **Profiles predate current vLLM kernels.** Vidur's profiling data were
   collected with Sarathi-Serve-era kernels. The baseline experiment (k = 0)
   measures how much error that alone causes on a given GPU and vLLM version;
