@@ -1,0 +1,18 @@
+{
+  "name": "e2_llama2_70b_tp4_a100_draft7b_k4",
+  "description": "Draft-model proposer: Llama-2-7B drafting for Llama-2-70B on 4 A100s. Tests the draft cost path and draft memory accounting. Needs a Vidur network profile that matches the node's GPU interconnect (see validation/README.md).",
+  "model": "meta-llama/Llama-2-70b-hf",
+  "device": "a100",
+  "network_device": "a100_pairwise_nvlink",
+  "tensor_parallel_size": 4,
+  "max_model_len": 4096,
+  "max_num_batched_tokens": 2048,
+  "max_num_seqs": 128,
+  "block_size": 16,
+  "speculative_config": {
+    "method": "draft_model",
+    "model": "meta-llama/Llama-2-7b-hf",
+    "num_speculative_tokens": 4,
+    "draft_tensor_parallel_size": 1
+  }
+}

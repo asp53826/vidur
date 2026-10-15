@@ -1,0 +1,18 @@
+{
+  "name": "e1_llama2_7b_a100_ngram_k4",
+  "description": "N-gram proposer, k=4. Cheap proposals, so this isolates the verify-step cost model and the proposal-miss model.",
+  "model": "meta-llama/Llama-2-7b-hf",
+  "device": "a100",
+  "network_device": "a100_pairwise_nvlink",
+  "tensor_parallel_size": 1,
+  "max_model_len": 4096,
+  "max_num_batched_tokens": 2048,
+  "max_num_seqs": 128,
+  "block_size": 16,
+  "speculative_config": {
+    "method": "ngram",
+    "num_speculative_tokens": 4,
+    "prompt_lookup_min": 2,
+    "prompt_lookup_max": 5
+  }
+}

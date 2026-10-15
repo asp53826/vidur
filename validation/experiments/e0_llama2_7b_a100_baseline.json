@@ -1,0 +1,13 @@
+{
+  "name": "e0_llama2_7b_a100_baseline",
+  "description": "No speculative decoding. Measures Vidur's baseline error on this GPU and vLLM version; every speculative result is read against it.",
+  "model": "meta-llama/Llama-2-7b-hf",
+  "device": "a100",
+  "network_device": "a100_pairwise_nvlink",
+  "tensor_parallel_size": 1,
+  "max_model_len": 4096,
+  "max_num_batched_tokens": 2048,
+  "max_num_seqs": 128,
+  "block_size": 16,
+  "speculative_config": null
+}
