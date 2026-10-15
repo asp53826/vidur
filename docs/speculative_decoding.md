@@ -72,6 +72,46 @@ bound fits, the next step is profiling verify-shaped attention directly
 (Vidur's attention profiler with q > 1 per decode sequence) and training a
 third model on it.
 
+### How much the choice matters
+
+`scripts/spec_decode_sweep.py` runs Llama-2-7B on Vidur's A100 profile
+(Splitwise conversation lengths, 300 requests, Sarathi with a 2,048-token
+budget) across load, k and acceptance rate, under both bounds. These are the
+simulator's predictions, not measurements.
+
+![Predicted TPOT speedup](assets/spec_decode_sweep/tpot_speedup.png)
+
+Median TPOT speedup over no speculation (full table in
+`assets/spec_decode_sweep/results.csv`):
+
+| load | k | α | KV read once | per-token cost |
+|---|---|---|---|---|
+| 1 req/s | 4 | 0.8 | 3.7× | 2.7× |
+| 1 req/s | 8 | 0.6 | 2.6× | 1.4× |
+| 3 req/s | 4 | 0.6 | 3.0× | 0.74× |
+| 6 req/s | 4 | 0.6 | 2.0× | 0.68× |
+| 6 req/s | 8 | 0.8 | 6.3× | 1.0× |
+
+At light load the bounds agree that speculation helps and differ on how much.
+At 3 req/s, where every configuration in the table still runs in steady state,
+they disagree about the sign: with k = 4 and α = 0.6, one predicts
+speculative decoding cuts median TPOT by 3× and the other predicts it makes
+TPOT about 1.35× worse. Whether to turn speculation on at a given load is the
+decision a capacity planner would use the simulator for, and it hinges on a
+kernel property nobody has measured for this setup.
+
+Two caveats on reading the numbers:
+
+- Speedups above the mean acceptance length (e.g. 5.1× at 3 req/s, k = 4,
+  α = 0.8, where acceptance length is 3.3) are a load effect, not a bug:
+  finishing requests sooner shrinks the running batch and the queue, so every
+  step gets cheaper.
+- 6 req/s is past this replica's capacity even without speculation: the
+  simulated baseline's median TTFT climbs from 0.15 s in the first quarter of
+  requests to 5.5 s in the last. Ratios there depend on run length and show
+  direction only. The 3 req/s rows are steady state (TTFT flat across the run
+  for every configuration listed).
+
 ## Calibrating acceptance from vLLM
 
 Acceptance is an input, not a prediction: it depends on the model pair and
