@@ -424,6 +424,147 @@ class MetricsConfig:
         os.makedirs(self.output_dir, exist_ok=True)
 
 
+SPEC_PROPOSERS = ("ngram", "draft_model", "fixed")
+SPEC_ACCEPTANCE_MODELS = ("constant", "per_position", "beta")
+SPEC_VERIFY_ATTENTION_MODELS = (
+    "decode_shared_kv",
+    "decode_per_token",
+    "interpolated",
+)
+SPEC_SAMPLING_MODES = ("stochastic", "expected")
+
+
+@dataclass
+class SpeculativeDecodingConfig:
+    """Speculative decoding as served by vLLM v1-style engines.
+
+    Each decode step verifies up to ``num_speculative_tokens`` proposed tokens
+    in one target forward pass, then keeps the accepted prefix plus one token
+    sampled by the target. ``num_speculative_tokens=0`` disables the feature
+    and leaves every code path identical to upstream Vidur.
+
+    See docs/speculative_decoding.md for the modeling assumptions.
+    """
+
+    num_speculative_tokens: int = field(
+        default=0,
+        metadata={
+            "help": "Tokens proposed per decode step (k). 0 disables speculative decoding."
+        },
+    )
+    proposer: str = field(
+        default="ngram",
+        metadata={
+            "help": "Proposer cost model: ngram (CPU lookup), draft_model (a profiled "
+            "smaller model run k times), or fixed (a + b * num_seqs ms, for "
+            "calibrated EAGLE/MTP-style heads)."
+        },
+    )
+    draft_model_name: str = field(
+        default="",
+        metadata={"help": "Draft model name when proposer=draft_model."},
+    )
+    draft_tensor_parallel_size: int = field(
+        default=1,
+        metadata={"help": "Tensor parallel size of the draft model."},
+    )
+    proposer_fixed_overhead_ms: float = field(
+        default=0.0,
+        metadata={"help": "Per-step proposer cost in ms (ngram and fixed proposers)."},
+    )
+    proposer_overhead_ms_per_seq: float = field(
+        default=0.0,
+        metadata={
+            "help": "Per-step proposer cost per drafting sequence in ms (ngram and fixed proposers)."
+        },
+    )
+    acceptance_model: str = field(
+        default="constant",
+        metadata={
+            "help": "constant: every position accepted with acceptance_rate; "
+            "per_position: conditional acceptance probability per draft position; "
+            "beta: per-request rate drawn from Beta(mean=acceptance_rate)."
+        },
+    )
+    acceptance_rate: float = field(
+        default=0.7,
+        metadata={"help": "Per-token acceptance probability (mean for the beta model)."},
+    )
+    acceptance_rate_per_position: List[float] = field(
+        default_factory=list,
+        metadata={
+            "help": "Conditional acceptance probabilities P(accept i | accepted 1..i-1) "
+            "for positions 1..k. Shorter lists are padded with their last value."
+        },
+    )
+    acceptance_beta_concentration: float = field(
+        default=10.0,
+        metadata={
+            "help": "a + b of the per-request Beta distribution (beta model). "
+            "Lower means more variation between requests."
+        },
+    )
+    sampling_mode: str = field(
+        default="stochastic",
+        metadata={
+            "help": "stochastic: sample accepted tokens per step; expected: emit the "
+            "expected number of tokens per step (deterministic, for analysis)."
+        },
+    )
+    verify_attention_model: str = field(
+        default="decode_shared_kv",
+        metadata={
+            "help": "Cost of attention over k+1 query tokens per sequence. "
+            "decode_shared_kv: KV read once, extra queries free (lower bound); "
+            "decode_per_token: every query token costs one decode query (upper bound); "
+            "interpolated: lower + w * (upper - lower)."
+        },
+    )
+    verify_attention_weight: float = field(
+        default=0.0,
+        metadata={"help": "w for verify_attention_model=interpolated, in [0, 1]."},
+    )
+    seed: int = field(
+        default=42,
+        metadata={"help": "Seed for acceptance sampling."},
+    )
+
+    @property
+    def enabled(self) -> bool:
+        return self.num_speculative_tokens > 0
+
+    def __post_init__(self):
+        if self.num_speculative_tokens < 0:
+            raise ValueError("num_speculative_tokens must be >= 0")
+        if self.proposer not in SPEC_PROPOSERS:
+            raise ValueError(f"proposer must be one of {SPEC_PROPOSERS}")
+        if self.acceptance_model not in SPEC_ACCEPTANCE_MODELS:
+            raise ValueError(f"acceptance_model must be one of {SPEC_ACCEPTANCE_MODELS}")
+        if self.verify_attention_model not in SPEC_VERIFY_ATTENTION_MODELS:
+            raise ValueError(
+                f"verify_attention_model must be one of {SPEC_VERIFY_ATTENTION_MODELS}"
+            )
+        if self.sampling_mode not in SPEC_SAMPLING_MODES:
+            raise ValueError(f"sampling_mode must be one of {SPEC_SAMPLING_MODES}")
+        if not 0.0 <= self.acceptance_rate <= 1.0:
+            raise ValueError("acceptance_rate must be in [0, 1]")
+        if any(not 0.0 <= p <= 1.0 for p in self.acceptance_rate_per_position):
+            raise ValueError("acceptance_rate_per_position values must be in [0, 1]")
+        if not 0.0 <= self.verify_attention_weight <= 1.0:
+            raise ValueError("verify_attention_weight must be in [0, 1]")
+        if self.acceptance_beta_concentration <= 0:
+            raise ValueError("acceptance_beta_concentration must be > 0")
+        if self.enabled and self.acceptance_model == "per_position":
+            if not self.acceptance_rate_per_position:
+                raise ValueError(
+                    "acceptance_model=per_position needs acceptance_rate_per_position"
+                )
+        if self.enabled and self.proposer == "draft_model" and not self.draft_model_name:
+            raise ValueError("proposer=draft_model needs draft_model_name")
+        if self.proposer_fixed_overhead_ms < 0 or self.proposer_overhead_ms_per_seq < 0:
+            raise ValueError("proposer overheads must be >= 0")
+
+
 @dataclass
 class ReplicaConfig:
     model_name: str = field(
@@ -450,8 +591,17 @@ class ReplicaConfig:
         default="a100_pairwise_nvlink",
         metadata={"help": "Network device."},
     )
+    speculative_decoding_config: SpeculativeDecodingConfig = field(
+        default_factory=SpeculativeDecodingConfig,
+        metadata={"help": "Speculative decoding config."},
+    )
 
     def __post_init__(self):
+        if self.speculative_decoding_config.enabled and self.num_pipeline_stages > 1:
+            raise ValueError(
+                "Speculative decoding is modeled for num_pipeline_stages=1 only "
+                "(vLLM does not combine it with pipeline parallelism)."
+            )
         self.world_size = self.num_pipeline_stages * self.tensor_parallel_size
         self.model_config: BaseModelConfig = BaseModelConfig.create_from_name(
             self.model_name
