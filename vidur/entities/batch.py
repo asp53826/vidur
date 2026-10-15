@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from vidur.entities.base_entity import BaseEntity
 from vidur.entities.request import Request
@@ -32,12 +32,28 @@ class Batch(BaseEntity):
         replica_id: int,
         requests: List[Request],
         num_tokens: List[int],
+        num_advance_tokens: Optional[List[int]] = None,
     ) -> None:
+        """
+        ``num_tokens`` is what each request feeds through the model this
+        iteration and drives the cost model. ``num_advance_tokens`` is how far
+        each request's progress moves when the iteration ends. They are equal
+        unless speculative decoding is on, where a verify step computes k + 1
+        tokens but keeps only the accepted prefix plus one.
+        """
         self._id = Batch.generate_id()
         self._replica_id = replica_id
 
         self._requests = requests
         self._num_tokens = num_tokens
+        if num_advance_tokens is None:
+            num_advance_tokens = num_tokens
+        assert len(num_advance_tokens) == len(num_tokens)
+        assert all(a <= t for a, t in zip(num_advance_tokens, num_tokens))
+        self._num_advance_tokens = num_advance_tokens
+        # captured now: a request whose prefill finishes in this batch flips
+        # is_prefill_complete in on_batch_end
+        self._is_decode = [r.is_prefill_complete for r in requests]
         self._total_num_tokens = sum(num_tokens)
         self._num_prefill_tokens = sum(
             [
@@ -64,6 +80,26 @@ class Batch(BaseEntity):
     @property
     def num_tokens(self) -> List[int]:
         return self._num_tokens
+
+    @property
+    def num_advance_tokens(self) -> List[int]:
+        return self._num_advance_tokens
+
+    @property
+    def num_speculative_tokens_drafted(self) -> int:
+        """Proposals verified this iteration (0 without speculative decoding)."""
+        return sum(
+            t - 1 for is_decode, t in zip(self._is_decode, self._num_tokens) if is_decode
+        )
+
+    @property
+    def num_speculative_tokens_accepted(self) -> int:
+        """Proposals accepted this iteration (0 without speculative decoding)."""
+        return sum(
+            a - 1
+            for is_decode, a in zip(self._is_decode, self._num_advance_tokens)
+            if is_decode
+        )
 
     @property
     def total_num_tokens(self) -> int:
@@ -125,7 +161,7 @@ class Batch(BaseEntity):
         self._completed = True
         self._completed_at = time
 
-        for request, num_tokens in zip(self._requests, self._num_tokens):
+        for request, num_tokens in zip(self._requests, self._num_advance_tokens):
             request.on_batch_end(time, num_tokens)
 
     @property
@@ -146,6 +182,7 @@ class Batch(BaseEntity):
             "scheduled": self._scheduled,
             "request_ids": self.request_ids,
             "num_tokens": self._num_tokens,
+            "num_advance_tokens": self._num_advance_tokens,
             "num_prefill_tokens": self.num_prefill_tokens,
             "num_decode_tokens": self.num_decode_tokens,
         }
