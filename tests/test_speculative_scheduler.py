@@ -165,3 +165,28 @@ def test_draft_model_shrinks_kv_capacity():
         spec(proposer="draft_model", draft_model_name="meta-llama/Llama-2-7b-hf")
     )
     assert with_draft._config.num_blocks < plain._config.num_blocks
+
+
+def test_steps_without_proposals_run_as_plain_decodes():
+    requests = make_requests([(32, 400)] * 4)
+    batches = run_to_completion(
+        make_scheduler(spec(k=4, alpha=1.0, proposal_probability=0.3)), requests
+    )
+    decode_entries = [
+        (n, a) for b in batches for n, a, d in zip(b.num_tokens, b.num_advance_tokens, b._is_decode) if d
+    ]
+    plain = [n for n, a in decode_entries if n == 1]
+    share = len(plain) / len(decode_entries)
+    # about 70% of steps lack a proposal (minus a few end-of-request steps)
+    assert 0.6 < share < 0.8
+    assert all(a == 1 for n, a in decode_entries if n == 1)
+    assert all(r.completed for r in requests)
+
+
+def test_no_proposals_reduces_to_plain_decoding():
+    sizes = random_sizes(15, seed=8)
+    base = run_to_completion(make_scheduler(), make_requests(sizes))
+    never = run_to_completion(
+        make_scheduler(spec(k=4, proposal_probability=0.0)), make_requests(sizes)
+    )
+    assert [b.num_tokens for b in never] == [b.num_tokens for b in base]

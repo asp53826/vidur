@@ -81,6 +81,15 @@ class AcceptanceSampler:
     def num_speculative_tokens(self) -> int:
         return self._k
 
+    def has_proposal(self) -> bool:
+        """Whether a decode step carries proposals (n-gram lookups can miss)."""
+        p = self._config.proposal_probability
+        if p >= 1.0:
+            return True
+        if p <= 0.0:
+            return False
+        return bool(self._rng.random() < p)
+
     def _request_rate(self, request_id: int) -> float:
         if request_id not in self._request_rates:
             mean = self._config.acceptance_rate

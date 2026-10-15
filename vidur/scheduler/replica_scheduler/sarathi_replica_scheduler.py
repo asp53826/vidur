@@ -135,13 +135,16 @@ class SarathiReplicaScheduler(BaseReplicaScheduler):
     ) -> int:
         """Tokens a decoding request feeds through the target this step.
 
-        One for the newest token plus up to k proposals. Proposals are capped
+        One for the newest token plus up to k proposals (none when the
+        proposer found nothing, see proposal_probability). Proposals are capped
         so a step can't run past the end of the request, and trimmed to fit
         the token budget the way vLLM v1 trims spec tokens; 0 means the
         budget is spent and the request waits for the next iteration.
         """
         num_remaining = request.total_tokens - request.num_processed_tokens
         num_proposals = min(self._spec_k, max(num_remaining - 1, 0))
+        if num_proposals and not self._acceptance_sampler.has_proposal():
+            num_proposals = 0
         budget = self._config.chunk_size - num_batch_tokens
         return max(0, min(num_proposals + 1, budget))
 

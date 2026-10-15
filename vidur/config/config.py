@@ -478,6 +478,14 @@ class SpeculativeDecodingConfig:
             "help": "Per-step proposer cost per drafting sequence in ms (ngram and fixed proposers)."
         },
     )
+    proposal_probability: float = field(
+        default=1.0,
+        metadata={
+            "help": "Fraction of decode steps that carry a proposal. Draft models "
+            "always propose; n-gram lookup proposes only when the context has a "
+            "match, and steps without one run as plain decodes."
+        },
+    )
     acceptance_model: str = field(
         default="constant",
         metadata={
@@ -550,6 +558,8 @@ class SpeculativeDecodingConfig:
             raise ValueError("acceptance_rate must be in [0, 1]")
         if any(not 0.0 <= p <= 1.0 for p in self.acceptance_rate_per_position):
             raise ValueError("acceptance_rate_per_position values must be in [0, 1]")
+        if not 0.0 <= self.proposal_probability <= 1.0:
+            raise ValueError("proposal_probability must be in [0, 1]")
         if not 0.0 <= self.verify_attention_weight <= 1.0:
             raise ValueError("verify_attention_weight must be in [0, 1]")
         if self.acceptance_beta_concentration <= 0:
