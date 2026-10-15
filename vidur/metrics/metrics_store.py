@@ -488,13 +488,15 @@ class MetricsStore:
         dir_plot_path = f"{self._config.output_dir}/plots"
         os.makedirs(dir_plot_path, exist_ok=True)
 
+        # plain CSV/JSON, written before any plotting that might fail
+        if self._spec_metrics is not None:
+            self._spec_metrics.store(self._config.output_dir)
+
         self._store_request_metrics(dir_plot_path)
         self._store_batch_metrics(dir_plot_path)
         self._store_completion_metrics(dir_plot_path)
         self._store_operation_metrics(dir_plot_path)
         self._store_utilization_metrics(dir_plot_path)
-        if self._spec_metrics is not None:
-            self._spec_metrics.store(self._config.output_dir)
 
     @property
     def speculative_decoding_metrics(self):
