@@ -22,6 +22,7 @@ from vidur.metrics.constants import (
     TokenMetricsTimeDistribution,
 )
 from vidur.metrics.data_series import DataSeries
+from vidur.metrics.speculative_decoding_metrics import SpeculativeDecodingMetrics
 from vidur.metrics.series_average_meter import SeriesAverageMeter
 from vidur.utils.mfu_calculator import MFUCalculator
 
@@ -58,6 +59,15 @@ class MetricsStore:
         self._num_replicas = self._simulation_config.cluster_config.num_replicas
         self._num_pipeline_stages = (
             self._simulation_config.cluster_config.replica_config.num_pipeline_stages
+        )
+
+        spec_config = (
+            self._simulation_config.cluster_config.replica_config.speculative_decoding_config
+        )
+        self._spec_metrics = (
+            SpeculativeDecodingMetrics(spec_config.num_speculative_tokens)
+            if spec_config.enabled
+            else None
         )
 
         # Initialise request metrics
@@ -483,6 +493,12 @@ class MetricsStore:
         self._store_completion_metrics(dir_plot_path)
         self._store_operation_metrics(dir_plot_path)
         self._store_utilization_metrics(dir_plot_path)
+        if self._spec_metrics is not None:
+            self._spec_metrics.store(self._config.output_dir)
+
+    @property
+    def speculative_decoding_metrics(self):
+        return self._spec_metrics
 
     @if_write_metrics
     def on_request_arrival(self, time: float, request: Request) -> None:
@@ -580,7 +596,7 @@ class MetricsStore:
         ].put(request.id, request.num_restarts)
 
     def _update_per_token_execution_times(
-        self, time: float, request: Request, batch: Batch
+        self, time: float, request: Request, batch: Batch, num_new_tokens: int = 1
     ) -> None:
         # if prefill has just finished in this iteration, update the prefill completion time series
         if (
@@ -609,7 +625,7 @@ class MetricsStore:
 
         self._token_completion_metrics_time_series[
             TokenCompletionMetricsTimeSeries.DECODE_COMPLETIONS
-        ].put(time, 1)
+        ].put(time, num_new_tokens)
 
     def _push_metric(
         self, metric_name: OperationMetrics, batch_id: int, value: float
@@ -648,8 +664,13 @@ class MetricsStore:
         if self._config.store_utilization_metrics:
             self._replica_memory_usage[replica_id - 1].put(time, memory_usage_percent)
 
-        for request in batch.requests:
-            self._update_per_token_execution_times(time, request, batch)
+        for request, num_new_tokens in zip(batch.requests, batch.num_advance_tokens):
+            self._update_per_token_execution_times(
+                time, request, batch, num_new_tokens
+            )
+
+        if self._spec_metrics is not None:
+            self._spec_metrics.on_batch_end(batch, batch._is_decode)
 
         if not self._config.store_batch_metrics:
             return
@@ -696,6 +717,11 @@ class MetricsStore:
         batch_stage: BatchStage,
         execution_time: ExecutionTime,
     ) -> None:
+        if self._spec_metrics is not None:
+            self._spec_metrics.on_proposer_time(
+                execution_time.speculative_proposer_time
+            )
+
         if not self._config.store_utilization_metrics:
             return
 
