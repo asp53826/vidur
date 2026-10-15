@@ -16,6 +16,8 @@ logger = init_logger(__name__)
 
 
 class BaseReplicaScheduler(ABC):
+    supports_speculative_decoding = False
+
     def __init__(
         self,
         replica_config: ReplicaConfig,
@@ -27,6 +29,15 @@ class BaseReplicaScheduler(ABC):
     ) -> None:
         self._config = replica_scheduler_config
         self._replica_config = replica_config
+
+        if (
+            replica_config.speculative_decoding_config.enabled
+            and not self.supports_speculative_decoding
+        ):
+            raise NotImplementedError(
+                f"{type(self).__name__} does not model speculative decoding; "
+                "use --replica_scheduler_config_type sarathi"
+            )
         self._request_generator_config = request_generator_config
         self._replica_id = replica.id
         self._num_stages = num_stages
@@ -36,6 +47,7 @@ class BaseReplicaScheduler(ABC):
         )
 
         memory_planner = MemoryPlanner(self._replica_config, replica)
+        self._memory_planner = memory_planner
 
         if not self._config.num_blocks:
             self._config.num_blocks = (

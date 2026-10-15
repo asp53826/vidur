@@ -1,14 +1,28 @@
 from math import ceil
 
+from typing import Optional
+
 from vidur.entities.batch import Batch, Request
+from vidur.entities.speculative_decoding import AcceptanceSampler
 from vidur.scheduler.replica_scheduler.base_replica_scheduler import (
     BaseReplicaScheduler,
 )
 
 
 class SarathiReplicaScheduler(BaseReplicaScheduler):
+    # Sarathi's token-budgeted, mixed prefill/decode batches are how vLLM v1
+    # schedules, and vLLM v1 is where speculative decoding is served.
+    supports_speculative_decoding = True
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        spec_config = self._replica_config.speculative_decoding_config
+        self._spec_enabled = spec_config.enabled
+        self._spec_k = spec_config.num_speculative_tokens
+        self._acceptance_sampler = (
+            AcceptanceSampler(spec_config) if self._spec_enabled else None
+        )
 
         # sarathi config
         self._num_running_batches = 0
@@ -20,7 +34,28 @@ class SarathiReplicaScheduler(BaseReplicaScheduler):
             self._config.watermark_blocks_fraction * self._config.num_blocks
         )
 
-    def _can_allocate_request(self, request: Request) -> bool:
+    def _spec_num_new_blocks(self, request: Request, num_tokens: int) -> int:
+        """Blocks a verify step needs beyond what the request already holds.
+
+        The step writes KV for the newest token plus every proposal, so the
+        request must hold num_processed_tokens + num_tokens - 1 slots. For
+        num_tokens == 1 this matches upstream's one-slot-per-decode rule.
+        Slots of rejected proposals stay allocated and are reused next step,
+        as vLLM v1 reserves lookahead slots rather than shrinking.
+        """
+        num_slots = request.num_processed_tokens + num_tokens - 1
+        num_blocks = ceil(num_slots / self._config.block_size)
+        return max(0, num_blocks - self._allocation_map.get(request.id, 0))
+
+    def _can_allocate_request(
+        self, request: Request, num_tokens: Optional[int] = None
+    ) -> bool:
+        if self._spec_enabled and num_tokens is not None and request.id in self._allocation_map:
+            return (
+                self._config.num_blocks - self._num_allocated_blocks
+                >= self._spec_num_new_blocks(request, num_tokens)
+            )
+
         if request.id not in self._allocation_map:
             # new request
             num_required_blocks = ceil(
@@ -36,7 +71,15 @@ class SarathiReplicaScheduler(BaseReplicaScheduler):
         # vllm requires at least one block to be available
         return self._config.num_blocks - self._num_allocated_blocks >= 1
 
-    def _allocate_request(self, request: Request) -> None:
+    def _allocate_request(
+        self, request: Request, num_tokens: Optional[int] = None
+    ) -> None:
+        if self._spec_enabled and num_tokens is not None and request.id in self._allocation_map:
+            num_new_blocks = self._spec_num_new_blocks(request, num_tokens)
+            if num_new_blocks:
+                self.allocate(request.id, num_new_blocks)
+            return
+
         if request.id not in self._allocation_map:
             # new request
             num_required_blocks = ceil(
@@ -63,6 +106,8 @@ class SarathiReplicaScheduler(BaseReplicaScheduler):
         for request in batch.requests:
             if request.completed:
                 self.free(request.id)
+                if self._acceptance_sampler is not None:
+                    self._acceptance_sampler.forget(request.id)
             else:
                 self._preempted_requests.append(request)
 
@@ -72,7 +117,9 @@ class SarathiReplicaScheduler(BaseReplicaScheduler):
         assert not request.completed
 
         if request.is_prefill_complete:
-            return 1
+            if not self._spec_enabled:
+                return 1
+            return self._get_spec_decode_num_tokens(request, num_batch_tokens)
 
         next_num_tokens = min(
             request.num_prefill_tokens - request.num_processed_tokens,
@@ -82,6 +129,38 @@ class SarathiReplicaScheduler(BaseReplicaScheduler):
         next_num_tokens = max(0, next_num_tokens)
 
         return next_num_tokens
+
+    def _get_spec_decode_num_tokens(
+        self, request: Request, num_batch_tokens: int
+    ) -> int:
+        """Tokens a decoding request feeds through the target this step.
+
+        One for the newest token plus up to k proposals. Proposals are capped
+        so a step can't run past the end of the request, and trimmed to fit
+        the token budget the way vLLM v1 trims spec tokens; 0 means the
+        budget is spent and the request waits for the next iteration.
+        """
+        num_remaining = request.total_tokens - request.num_processed_tokens
+        num_proposals = min(self._spec_k, max(num_remaining - 1, 0))
+        budget = self._config.chunk_size - num_batch_tokens
+        return max(0, min(num_proposals + 1, budget))
+
+    def _make_batch(self, requests, num_tokens) -> Batch:
+        if not self._spec_enabled:
+            return Batch(self._replica_id, requests, num_tokens)
+
+        num_advance_tokens = []
+        for request, n in zip(requests, num_tokens):
+            if not request.is_prefill_complete:
+                num_advance_tokens.append(n)
+                continue
+            num_remaining = request.total_tokens - request.num_processed_tokens
+            num_advance_tokens.append(
+                self._acceptance_sampler.sample_emitted(
+                    request.id, k=n - 1, max_tokens=num_remaining
+                )
+            )
+        return Batch(self._replica_id, requests, num_tokens, num_advance_tokens)
 
     def _get_next_batch(self) -> Batch:
         requests = []
@@ -111,7 +190,8 @@ class SarathiReplicaScheduler(BaseReplicaScheduler):
                 skipped_requests.append(request)
                 continue
 
-            while not self._can_allocate_request(request):
+            spec_num_tokens = next_num_tokens if self._spec_enabled else None
+            while not self._can_allocate_request(request, spec_num_tokens):
                 if self._preempted_requests:
                     victim_request = self._preempted_requests.pop(-1)
                     victim_request.restart()
@@ -123,7 +203,7 @@ class SarathiReplicaScheduler(BaseReplicaScheduler):
                     self._request_queue = [request] + self._request_queue
                     break
             else:
-                self._allocate_request(request)
+                self._allocate_request(request, spec_num_tokens)
                 assert request.is_prefill_complete
                 num_batch_tokens += next_num_tokens
                 requests.append(request)
@@ -183,4 +263,4 @@ class SarathiReplicaScheduler(BaseReplicaScheduler):
         if not requests:
             return
 
-        return Batch(self._replica_id, requests, num_tokens)
+        return self._make_batch(requests, num_tokens)
