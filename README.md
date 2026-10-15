@@ -1,5 +1,19 @@
 # Vidur: LLM Inference System Simulator
 
+> **This fork adds speculative decoding** (branch `spec-decode`): verify steps
+> that compute k + 1 tokens and keep the accepted prefix, n-gram and
+> draft-model proposer costs, lookahead KV allocation, and acceptance
+> calibrated from vLLM's own counters. Off by default; when off, a simulation
+> writes the same request metrics as upstream, byte for byte. A harness in [`validation/`](validation/README.md)
+> measures it against real vLLM runs on GPUs.
+> Design and assumptions: [`docs/speculative_decoding.md`](docs/speculative_decoding.md).
+>
+> ```sh
+> python -m vidur.main --replica_scheduler_config_type sarathi \
+>   --speculative_decoding_config_num_speculative_tokens 4 \
+>   --speculative_decoding_config_acceptance_rate 0.7  # plus the usual flags
+> ```
+
 Vidur is a high-fidelity and extensible LLM inference system simulator. It can help you with:
 
 1. Study the system performance of models under different workloads and configurations.
