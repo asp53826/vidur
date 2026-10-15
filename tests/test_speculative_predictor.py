@@ -78,13 +78,17 @@ def test_disabled_spec_matches_upstream_formula():
 
 def test_lower_bound_ignores_extra_queries():
     p = make_predictor(spec(verify_attention_model="decode_shared_kv"))
-    assert p._get_attention_decode_execution_time(verify_batch()) == with_overhead(8, 256)
+    assert p._get_attention_decode_execution_time(verify_batch()) == with_overhead(
+        8, 256
+    )
 
 
 def test_upper_bound_charges_every_query():
     p = make_predictor(spec(verify_attention_model="decode_per_token"))
     assert p._get_attention_decode_execution_time(verify_batch()) == pytest.approx(
-        with_overhead(40, 256) if 40 <= MAX_BS else with_overhead(MAX_BS, 256) * 40 / MAX_BS
+        with_overhead(40, 256)
+        if 40 <= MAX_BS
+        else with_overhead(MAX_BS, 256) * 40 / MAX_BS
     )
 
 

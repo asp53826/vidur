@@ -129,7 +129,8 @@ class SpecCounters:
             num_draft_tokens=self.num_draft_tokens - before.num_draft_tokens,
             num_accepted_tokens=self.num_accepted_tokens - before.num_accepted_tokens,
             accepted_per_pos={
-                p: self.accepted_per_pos.get(p, 0.0) - before.accepted_per_pos.get(p, 0.0)
+                p: self.accepted_per_pos.get(p, 0.0)
+                - before.accepted_per_pos.get(p, 0.0)
                 for p in sorted(positions)
             },
         )

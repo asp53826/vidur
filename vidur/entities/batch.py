@@ -89,7 +89,9 @@ class Batch(BaseEntity):
     def num_speculative_tokens_drafted(self) -> int:
         """Proposals verified this iteration (0 without speculative decoding)."""
         return sum(
-            t - 1 for is_decode, t in zip(self._is_decode, self._num_tokens) if is_decode
+            t - 1
+            for is_decode, t in zip(self._is_decode, self._num_tokens)
+            if is_decode
         )
 
     @property

@@ -3,8 +3,8 @@ from math import ceil
 
 import pytest
 
-from vidur.config import SpeculativeDecodingConfig
 from tests.scheduler_harness import make_requests, make_scheduler, run_to_completion
+from vidur.config import SpeculativeDecodingConfig
 
 
 def spec(k=4, alpha=0.7, **kwargs):
@@ -14,7 +14,13 @@ def spec(k=4, alpha=0.7, **kwargs):
 
 
 def batch_trace(batches):
-    return [(tuple(r.id - batches[0].requests[0].id for r in b.requests), tuple(b.num_tokens)) for b in batches]
+    return [
+        (
+            tuple(r.id - batches[0].requests[0].id for r in b.requests),
+            tuple(b.num_tokens),
+        )
+        for b in batches
+    ]
 
 
 def random_sizes(n, seed=0, max_prompt=900, max_decode=300):
@@ -64,10 +70,12 @@ def test_zero_acceptance_emits_one_but_still_computes_k_plus_one():
 
 def test_proposals_never_run_past_request_end():
     requests = make_requests(random_sizes(30, seed=2, max_decode=12))
+
     def check(scheduler, batch):
         for r, n, decoding in zip(batch.requests, batch.num_tokens, batch._is_decode):
             if decoding:
                 assert n <= r.total_tokens - r.num_processed_tokens
+
     run_to_completion(make_scheduler(spec(k=8, alpha=1.0)), requests, on_batch=check)
 
 
@@ -84,12 +92,14 @@ def test_token_budget_trims_proposals():
 
 def test_kv_slots_cover_every_verify_step():
     block_size = 16
+
     def check(scheduler, batch):
         assert scheduler.num_allocated_blocks <= scheduler._config.num_blocks
         for r, n, decoding in zip(batch.requests, batch.num_tokens, batch._is_decode):
             if decoding:
                 needed = ceil((r.num_processed_tokens + n - 1) / block_size)
                 assert scheduler._allocation_map[r.id] >= needed
+
     requests = make_requests(random_sizes(40, seed=3))
     run_to_completion(make_scheduler(spec(k=5)), requests, on_batch=check)
 
@@ -98,8 +108,10 @@ def test_memory_pressure_preempts_and_still_completes():
     # small cache forces restarts; lookahead slots make pressure worse
     requests = make_requests(random_sizes(40, seed=4, max_prompt=400, max_decode=400))
     scheduler = make_scheduler(spec(k=6, alpha=0.8), num_blocks=120)
+
     def check(sched, batch):
         assert sched.num_allocated_blocks <= 120
+
     run_to_completion(scheduler, requests, on_batch=check)
     assert all(r.completed for r in requests)
     assert any(r.num_restarts > 0 for r in requests)
@@ -155,6 +167,7 @@ def test_unsupported_scheduler_refuses_spec():
 
 def test_pipeline_parallel_rejected():
     from vidur.config import ReplicaConfig
+
     with pytest.raises(ValueError):
         ReplicaConfig(num_pipeline_stages=2, speculative_decoding_config=spec())
 
@@ -173,7 +186,10 @@ def test_steps_without_proposals_run_as_plain_decodes():
         make_scheduler(spec(k=4, alpha=1.0, proposal_probability=0.3)), requests
     )
     decode_entries = [
-        (n, a) for b in batches for n, a, d in zip(b.num_tokens, b.num_advance_tokens, b._is_decode) if d
+        (n, a)
+        for b in batches
+        for n, a, d in zip(b.num_tokens, b.num_advance_tokens, b._is_decode)
+        if d
     ]
     plain = [n for n, a in decode_entries if n == 1]
     share = len(plain) / len(decode_entries)
@@ -197,7 +213,9 @@ def test_float_token_counts_from_trace_replay():
     requests = make_requests([(395.0, 112.0), (64.0, 30.0)])
     run_to_completion(
         make_scheduler(
-            spec(acceptance_model="per_position", acceptance_rate_per_position=[0.8, 0.6])
+            spec(
+                acceptance_model="per_position", acceptance_rate_per_position=[0.8, 0.6]
+            )
         ),
         requests,
     )

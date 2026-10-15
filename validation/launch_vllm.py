@@ -17,15 +17,24 @@ import sys
 
 def command(experiment: dict, port: int) -> list:
     cmd = [
-        "vllm", "serve", experiment["model"],
-        "--port", str(port),
-        "--tensor-parallel-size", str(experiment.get("tensor_parallel_size", 1)),
-        "--max-model-len", str(experiment["max_model_len"]),
-        "--max-num-batched-tokens", str(experiment["max_num_batched_tokens"]),
-        "--max-num-seqs", str(experiment["max_num_seqs"]),
-        "--block-size", str(experiment.get("block_size", 16)),
+        "vllm",
+        "serve",
+        experiment["model"],
+        "--port",
+        str(port),
+        "--tensor-parallel-size",
+        str(experiment.get("tensor_parallel_size", 1)),
+        "--max-model-len",
+        str(experiment["max_model_len"]),
+        "--max-num-batched-tokens",
+        str(experiment["max_num_batched_tokens"]),
+        "--max-num-seqs",
+        str(experiment["max_num_seqs"]),
+        "--block-size",
+        str(experiment.get("block_size", 16)),
         "--no-enable-prefix-caching",
-        "--seed", "0",
+        "--seed",
+        "0",
     ]
     spec = experiment.get("speculative_config")
     if spec:

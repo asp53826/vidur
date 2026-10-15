@@ -18,13 +18,13 @@ from vidur.config import (
     MetricsConfig,
     ReplicaConfig,
 )
-from vidur.execution_time_predictor.speculative_proxy import (
-    ProxyBatch,
-    ProxyRequest,
-)
 from vidur.entities import Batch
 from vidur.execution_time_predictor.base_execution_time_predictor import (
     BaseExecutionTimePredictor,
+)
+from vidur.execution_time_predictor.speculative_proxy import (
+    ProxyBatch,
+    ProxyRequest,
 )
 from vidur.logger import init_logger
 

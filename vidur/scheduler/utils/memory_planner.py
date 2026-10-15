@@ -28,9 +28,9 @@ class MemoryPlanner:
     def _get_draft_parameter_memory_per_device(self) -> int:
         if self._draft_replica_config is None:
             return 0
-        return 2 * ParamCounter(
-            self._draft_replica_config
-        ).get_num_parameters_per_device()
+        return (
+            2 * ParamCounter(self._draft_replica_config).get_num_parameters_per_device()
+        )
 
     def _get_draft_kv_cache_memory_per_device_per_request(self) -> int:
         if self._draft_replica_config is None:

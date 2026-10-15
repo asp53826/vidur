@@ -30,7 +30,10 @@ def measured_frame(run_dir, sim_inputs):
     df = order.merge(measured, on="request_index", how="left")
     df["ttft"] = df["ttft_s"]
     df["e2e"] = df["e2e_s"]
-    df["tpot"] = [tpot(e, t, int(n)) for e, t, n in zip(df["e2e"], df["ttft"], df["completion_tokens"])]
+    df["tpot"] = [
+        tpot(e, t, int(n))
+        for e, t, n in zip(df["e2e"], df["ttft"], df["completion_tokens"])
+    ]
     df["end"] = df["sent_s"] + df["e2e"]
     return df
 
@@ -44,7 +47,10 @@ def simulated_frame(result_dir, measured):
     )
     df["ttft"] = df["prefill_e2e_time"]
     df["e2e"] = df["request_e2e_time"]
-    df["tpot"] = [tpot(e, t, int(n)) for e, t, n in zip(df["e2e"], df["ttft"], df["request_num_decode_tokens"])]
+    df["tpot"] = [
+        tpot(e, t, int(n))
+        for e, t, n in zip(df["e2e"], df["ttft"], df["request_num_decode_tokens"])
+    ]
     return df
 
 
@@ -60,10 +66,16 @@ def compare(measured, simulated, sim_trace):
         entry = {"mape": mape(s, m)}
         for q in PERCENTILES:
             mq, sq = percentile(m, q), percentile(s, q)
-            entry[f"p{q}"] = {"measured": mq, "simulated": sq, "rel_error": relative_error(sq, mq)}
+            entry[f"p{q}"] = {
+                "measured": mq,
+                "simulated": sq,
+                "rel_error": relative_error(sq, mq),
+            }
         out[metric] = entry
 
-    measured_tput = throughput(measured["completion_tokens"], measured["sent_s"], measured["end"])
+    measured_tput = throughput(
+        measured["completion_tokens"], measured["sent_s"], measured["end"]
+    )
     arrivals = sim_trace["arrived_at"].to_numpy(float)
     sim_ends = arrivals + simulated["e2e"].to_numpy(float)
     sim_tput = throughput(sim_trace["num_decode_tokens"], arrivals, sim_ends)
@@ -109,7 +121,11 @@ def markdown(results, run_dir, calibration, server):
                 + " / ".join(fmt_pct(e[f"p{q}"]["rel_error"]) for q in PERCENTILES)
                 + f" | {fmt_pct(e['mape']).lstrip('+')} |"
             )
-    lines += ["", "| variant | throughput measured (tok/s) | simulated | error | sim mean acceptance length |", "|---|---|---|---|---|"]
+    lines += [
+        "",
+        "| variant | throughput measured (tok/s) | simulated | error | sim mean acceptance length |",
+        "|---|---|---|---|---|",
+    ]
     for name, r in results.items():
         t = r["output_throughput_tok_s"]
         mal = r.get("sim_mean_acceptance_length")
@@ -122,7 +138,9 @@ def markdown(results, run_dir, calibration, server):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--run-dir", required=True, help="replay output (measured.csv)")
     p.add_argument("--sim-inputs", required=True)
     p.add_argument("--sim-dir", required=True, help="run_sim.py output")
@@ -137,15 +155,22 @@ def main(argv=None):
         server = json.load(f)
 
     results = {}
-    for variant_file in sorted(glob.glob(os.path.join(args.sim_dir, "*", "variant.json"))):
+    for variant_file in sorted(
+        glob.glob(os.path.join(args.sim_dir, "*", "variant.json"))
+    ):
         with open(variant_file) as f:
             variant = json.load(f)
         simulated = simulated_frame(variant["result_dir"], measured)
         missing = simulated["e2e"].isna().sum()
         if missing:
-            print(f"WARNING: {variant['name']}: {missing} requests missing from Vidur output", file=sys.stderr)
+            print(
+                f"WARNING: {variant['name']}: {missing} requests missing from Vidur output",
+                file=sys.stderr,
+            )
         r = compare(measured, simulated, sim_trace)
-        summary = os.path.join(variant["result_dir"], "speculative_decoding_summary.json")
+        summary = os.path.join(
+            variant["result_dir"], "speculative_decoding_summary.json"
+        )
         if os.path.exists(summary):
             with open(summary) as f:
                 r["sim_mean_acceptance_length"] = json.load(f)["mean_acceptance_length"]

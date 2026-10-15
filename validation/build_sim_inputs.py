@@ -27,6 +27,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from common import SpecCounters  # noqa: E402
+
 from vidur.entities.speculative_decoding import (  # noqa: E402
     conditional_from_unconditional,
 )
@@ -38,7 +39,9 @@ def load_experiment(path):
 
 
 def build_trace(measured: pd.DataFrame) -> pd.DataFrame:
-    ok = measured[(measured["error"].fillna("") == "") & measured["completion_tokens"].notna()]
+    ok = measured[
+        (measured["error"].fillna("") == "") & measured["completion_tokens"].notna()
+    ]
     trace = pd.DataFrame(
         {
             "request_index": ok["request_index"].astype(int),
@@ -82,22 +85,37 @@ def calibrate(trace: pd.DataFrame, spec: SpecCounters, k: int) -> dict:
     }
 
 
-def vidur_args(experiment: dict, trace_path: str, num_blocks, calibration: dict) -> list:
+def vidur_args(
+    experiment: dict, trace_path: str, num_blocks, calibration: dict
+) -> list:
     max_tokens = experiment["max_model_len"]
     args = [
-        "--replica_config_model_name", experiment["model"],
-        "--replica_config_device", experiment["device"],
-        "--replica_config_network_device", experiment.get("network_device", "a100_pairwise_nvlink"),
-        "--replica_config_tensor_parallel_size", str(experiment.get("tensor_parallel_size", 1)),
-        "--replica_config_num_pipeline_stages", "1",
-        "--cluster_config_num_replicas", "1",
-        "--request_generator_config_type", "trace_replay",
-        "--trace_request_generator_config_trace_file", trace_path,
-        "--trace_request_generator_config_max_tokens", str(max_tokens),
-        "--replica_scheduler_config_type", "sarathi",
-        "--sarathi_scheduler_config_chunk_size", str(experiment["max_num_batched_tokens"]),
-        "--sarathi_scheduler_config_batch_size_cap", str(experiment["max_num_seqs"]),
-        "--sarathi_scheduler_config_block_size", str(experiment.get("block_size", 16)),
+        "--replica_config_model_name",
+        experiment["model"],
+        "--replica_config_device",
+        experiment["device"],
+        "--replica_config_network_device",
+        experiment.get("network_device", "a100_pairwise_nvlink"),
+        "--replica_config_tensor_parallel_size",
+        str(experiment.get("tensor_parallel_size", 1)),
+        "--replica_config_num_pipeline_stages",
+        "1",
+        "--cluster_config_num_replicas",
+        "1",
+        "--request_generator_config_type",
+        "trace_replay",
+        "--trace_request_generator_config_trace_file",
+        trace_path,
+        "--trace_request_generator_config_max_tokens",
+        str(max_tokens),
+        "--replica_scheduler_config_type",
+        "sarathi",
+        "--sarathi_scheduler_config_chunk_size",
+        str(experiment["max_num_batched_tokens"]),
+        "--sarathi_scheduler_config_batch_size_cap",
+        str(experiment["max_num_seqs"]),
+        "--sarathi_scheduler_config_block_size",
+        str(experiment.get("block_size", 16)),
         "--random_forrest_execution_time_predictor_config_prediction_max_prefill_chunk_size",
         str(max(4096, experiment["max_num_batched_tokens"])),
         "--random_forrest_execution_time_predictor_config_prediction_max_batch_size",
@@ -114,9 +132,12 @@ def vidur_args(experiment: dict, trace_path: str, num_blocks, calibration: dict)
         method = spec_cfg["method"]
         proposer = {"ngram": "ngram", "draft_model": "draft_model"}.get(method, "fixed")
         args += [
-            "--speculative_decoding_config_num_speculative_tokens", str(k),
-            "--speculative_decoding_config_proposer", proposer,
-            "--speculative_decoding_config_acceptance_model", "per_position",
+            "--speculative_decoding_config_num_speculative_tokens",
+            str(k),
+            "--speculative_decoding_config_proposer",
+            proposer,
+            "--speculative_decoding_config_acceptance_model",
+            "per_position",
             "--speculative_decoding_config_acceptance_rate_per_position",
             *[f"{p:.6f}" for p in calibration["acceptance_rate_per_position"]],
             "--speculative_decoding_config_proposal_probability",
@@ -124,21 +145,32 @@ def vidur_args(experiment: dict, trace_path: str, num_blocks, calibration: dict)
         ]
         if proposer == "draft_model":
             args += [
-                "--speculative_decoding_config_draft_model_name", spec_cfg["model"],
+                "--speculative_decoding_config_draft_model_name",
+                spec_cfg["model"],
                 "--speculative_decoding_config_draft_tensor_parallel_size",
                 str(spec_cfg.get("draft_tensor_parallel_size", 1)),
             ]
         overheads = experiment.get("proposer_overheads_ms", {})
         if "fixed" in overheads:
-            args += ["--speculative_decoding_config_proposer_fixed_overhead_ms", str(overheads["fixed"])]
+            args += [
+                "--speculative_decoding_config_proposer_fixed_overhead_ms",
+                str(overheads["fixed"]),
+            ]
         if "per_seq" in overheads:
-            args += ["--speculative_decoding_config_proposer_overhead_ms_per_seq", str(overheads["per_seq"])]
+            args += [
+                "--speculative_decoding_config_proposer_overhead_ms_per_seq",
+                str(overheads["per_seq"]),
+            ]
     return args
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--experiment", required=True, help="experiment JSON used to launch vLLM")
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument(
+        "--experiment", required=True, help="experiment JSON used to launch vLLM"
+    )
     p.add_argument("--run-dir", required=True, help="replay output directory")
     p.add_argument("--out-dir", required=True)
     args = p.parse_args(argv)
@@ -151,8 +183,12 @@ def main(argv=None):
     os.makedirs(args.out_dir, exist_ok=True)
     trace = build_trace(measured)
     trace_path = os.path.abspath(os.path.join(args.out_dir, "trace.csv"))
-    trace[["arrived_at", "num_prefill_tokens", "num_decode_tokens"]].to_csv(trace_path, index=False)
-    trace[["request_index"]].to_csv(os.path.join(args.out_dir, "trace_order.csv"), index_label="sim_request_id")
+    trace[["arrived_at", "num_prefill_tokens", "num_decode_tokens"]].to_csv(
+        trace_path, index=False
+    )
+    trace[["request_index"]].to_csv(
+        os.path.join(args.out_dir, "trace_order.csv"), index_label="sim_request_id"
+    )
 
     spec_cfg = experiment.get("speculative_config") or {}
     k = int(spec_cfg.get("num_speculative_tokens", 0))
@@ -162,9 +198,17 @@ def main(argv=None):
     num_blocks = cache.get("num_gpu_blocks")
     if num_blocks in (None, "", "None"):
         num_blocks = None
-        print("WARNING: vLLM did not report num_gpu_blocks; Vidur will size the cache itself", file=sys.stderr)
-    if cache.get("block_size") and int(cache["block_size"]) != experiment.get("block_size", 16):
-        print(f"WARNING: vLLM block_size {cache['block_size']} differs from the experiment file", file=sys.stderr)
+        print(
+            "WARNING: vLLM did not report num_gpu_blocks; Vidur will size the cache itself",
+            file=sys.stderr,
+        )
+    if cache.get("block_size") and int(cache["block_size"]) != experiment.get(
+        "block_size", 16
+    ):
+        print(
+            f"WARNING: vLLM block_size {cache['block_size']} differs from the experiment file",
+            file=sys.stderr,
+        )
 
     sim_args = vidur_args(experiment, trace_path, num_blocks, calibration)
     with open(os.path.join(args.out_dir, "calibration.json"), "w") as f:

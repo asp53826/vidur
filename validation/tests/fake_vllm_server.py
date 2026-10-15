@@ -64,7 +64,10 @@ async def completions(request):
         await resp.write(f"data: {json.dumps(event)}\n\n".encode())
         if produced < max_tokens:
             await asyncio.sleep(engine.step_s)
-    final = {"choices": [], "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": produced}}
+    final = {
+        "choices": [],
+        "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": produced},
+    }
     await resp.write(f"data: {json.dumps(final)}\n\n".encode())
     await resp.write(b"data: [DONE]\n\n")
     return resp

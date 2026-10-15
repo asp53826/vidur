@@ -1,5 +1,4 @@
 from math import ceil
-
 from typing import Optional
 
 from vidur.entities.batch import Batch, Request
@@ -50,7 +49,11 @@ class SarathiReplicaScheduler(BaseReplicaScheduler):
     def _can_allocate_request(
         self, request: Request, num_tokens: Optional[int] = None
     ) -> bool:
-        if self._spec_enabled and num_tokens is not None and request.id in self._allocation_map:
+        if (
+            self._spec_enabled
+            and num_tokens is not None
+            and request.id in self._allocation_map
+        ):
             return (
                 self._config.num_blocks - self._num_allocated_blocks
                 >= self._spec_num_new_blocks(request, num_tokens)
@@ -74,7 +77,11 @@ class SarathiReplicaScheduler(BaseReplicaScheduler):
     def _allocate_request(
         self, request: Request, num_tokens: Optional[int] = None
     ) -> None:
-        if self._spec_enabled and num_tokens is not None and request.id in self._allocation_map:
+        if (
+            self._spec_enabled
+            and num_tokens is not None
+            and request.id in self._allocation_map
+        ):
             num_new_blocks = self._spec_num_new_blocks(request, num_tokens)
             if num_new_blocks:
                 self.allocate(request.id, num_new_blocks)

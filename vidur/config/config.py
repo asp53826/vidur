@@ -496,7 +496,9 @@ class SpeculativeDecodingConfig:
     )
     acceptance_rate: float = field(
         default=0.7,
-        metadata={"help": "Per-token acceptance probability (mean for the beta model)."},
+        metadata={
+            "help": "Per-token acceptance probability (mean for the beta model)."
+        },
     )
     acceptance_rate_per_position: List[float] = field(
         default_factory=list,
@@ -547,7 +549,9 @@ class SpeculativeDecodingConfig:
         if self.proposer not in SPEC_PROPOSERS:
             raise ValueError(f"proposer must be one of {SPEC_PROPOSERS}")
         if self.acceptance_model not in SPEC_ACCEPTANCE_MODELS:
-            raise ValueError(f"acceptance_model must be one of {SPEC_ACCEPTANCE_MODELS}")
+            raise ValueError(
+                f"acceptance_model must be one of {SPEC_ACCEPTANCE_MODELS}"
+            )
         if self.verify_attention_model not in SPEC_VERIFY_ATTENTION_MODELS:
             raise ValueError(
                 f"verify_attention_model must be one of {SPEC_VERIFY_ATTENTION_MODELS}"
@@ -569,7 +573,11 @@ class SpeculativeDecodingConfig:
                 raise ValueError(
                     "acceptance_model=per_position needs acceptance_rate_per_position"
                 )
-        if self.enabled and self.proposer == "draft_model" and not self.draft_model_name:
+        if (
+            self.enabled
+            and self.proposer == "draft_model"
+            and not self.draft_model_name
+        ):
             raise ValueError("proposer=draft_model needs draft_model_name")
         if self.proposer_fixed_overhead_ms < 0 or self.proposer_overhead_ms_per_seq < 0:
             raise ValueError("proposer overheads must be >= 0")

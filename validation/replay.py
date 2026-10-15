@@ -45,10 +45,14 @@ async def scrape_metrics(session, base_url):
         return parse_prometheus(await resp.text())
 
 
-async def send_one(session, base_url, model, req: WorkloadRequest, t0, temperature, timeout):
+async def send_one(
+    session, base_url, model, req: WorkloadRequest, t0, temperature, timeout
+):
     payload = {
         "model": model,
-        "prompt": req.prompt_token_ids if req.prompt_token_ids is not None else req.prompt,
+        "prompt": (
+            req.prompt_token_ids if req.prompt_token_ids is not None else req.prompt
+        ),
         "max_tokens": req.max_tokens,
         "temperature": temperature,
         "ignore_eos": req.ignore_eos,
@@ -87,7 +91,7 @@ async def send_one(session, base_url, model, req: WorkloadRequest, t0, temperatu
                     message = message.decode().strip()
                     if not message.startswith("data:"):
                         continue
-                    body = message[len("data:"):].strip()
+                    body = message[len("data:") :].strip()
                     if body == "[DONE]":
                         continue
                     event = json.loads(body)
@@ -128,7 +132,15 @@ async def replay(args, workload: List[WorkloadRequest]):
                 await asyncio.sleep(delay)
             tasks.append(
                 asyncio.create_task(
-                    send_one(session, args.base_url, args.model, req, t0, args.temperature, args.timeout)
+                    send_one(
+                        session,
+                        args.base_url,
+                        args.model,
+                        req,
+                        t0,
+                        args.temperature,
+                        args.timeout,
+                    )
                 )
             )
         results = await asyncio.gather(*tasks)
@@ -141,7 +153,9 @@ async def replay(args, workload: List[WorkloadRequest]):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--workload", required=True)
     p.add_argument("--out-dir", required=True)
     p.add_argument("--base-url", default="http://localhost:8000")
@@ -162,7 +176,10 @@ def main(argv=None):
 
     with open(os.path.join(args.out_dir, "chunks.jsonl"), "w") as f:
         for row, chunks in results:
-            f.write(json.dumps({"request_index": row["request_index"], "chunks": chunks}) + "\n")
+            f.write(
+                json.dumps({"request_index": row["request_index"], "chunks": chunks})
+                + "\n"
+            )
 
     spec = SpecCounters.from_samples(after).minus(SpecCounters.from_samples(before))
     server = {
@@ -190,9 +207,15 @@ def main(argv=None):
 
     print(json.dumps(meta, indent=2))
     if meta["num_failed"]:
-        print(f"WARNING: {meta['num_failed']} requests failed; see measured.csv", file=sys.stderr)
+        print(
+            f"WARNING: {meta['num_failed']} requests failed; see measured.csv",
+            file=sys.stderr,
+        )
     if meta["send_lag_max_ms"] > 50:
-        print("WARNING: client fell behind the arrival schedule by >50 ms", file=sys.stderr)
+        print(
+            "WARNING: client fell behind the arrival schedule by >50 ms",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":

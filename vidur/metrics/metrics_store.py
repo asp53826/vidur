@@ -22,8 +22,8 @@ from vidur.metrics.constants import (
     TokenMetricsTimeDistribution,
 )
 from vidur.metrics.data_series import DataSeries
-from vidur.metrics.speculative_decoding_metrics import SpeculativeDecodingMetrics
 from vidur.metrics.series_average_meter import SeriesAverageMeter
+from vidur.metrics.speculative_decoding_metrics import SpeculativeDecodingMetrics
 from vidur.utils.mfu_calculator import MFUCalculator
 
 logger = init_logger(__name__)
@@ -667,9 +667,7 @@ class MetricsStore:
             self._replica_memory_usage[replica_id - 1].put(time, memory_usage_percent)
 
         for request, num_new_tokens in zip(batch.requests, batch.num_advance_tokens):
-            self._update_per_token_execution_times(
-                time, request, batch, num_new_tokens
-            )
+            self._update_per_token_execution_times(time, request, batch, num_new_tokens)
 
         if self._spec_metrics is not None:
             self._spec_metrics.on_batch_end(batch, batch._is_decode)

@@ -17,7 +17,9 @@ from vidur.scheduler.replica_scheduler.sarathi_replica_scheduler import (
 )
 
 
-def make_scheduler(spec=None, num_blocks=None, chunk_size=512, batch_size_cap=64, max_tokens=4096):
+def make_scheduler(
+    spec=None, num_blocks=None, chunk_size=512, batch_size_cap=64, max_tokens=4096
+):
     replica_config = ReplicaConfig(
         model_name="meta-llama/Llama-2-7b-hf",
         speculative_decoding_config=spec or SpeculativeDecodingConfig(),
@@ -62,4 +64,7 @@ def run_to_completion(scheduler, requests, max_iterations=100_000, on_batch=None
 
 
 def make_requests(sizes):
-    return [Request(arrived_at=0.0, num_prefill_tokens=p, num_decode_tokens=d) for p, d in sizes]
+    return [
+        Request(arrived_at=0.0, num_prefill_tokens=p, num_decode_tokens=d)
+        for p, d in sizes
+    ]

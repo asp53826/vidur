@@ -60,7 +60,9 @@ def poisson_arrivals(n, qps, rng):
 
 
 def build_synthetic(args, rng):
-    lengths = sample_lengths(args.lengths_trace, args.num_requests, rng, args.max_total_tokens)
+    lengths = sample_lengths(
+        args.lengths_trace, args.num_requests, rng, args.max_total_tokens
+    )
     arrivals = poisson_arrivals(args.num_requests, args.qps, rng)
     requests = []
     for i, ((prompt_len, output_len), t) in enumerate(zip(lengths, arrivals)):
@@ -88,7 +90,9 @@ def build_text(args, rng):
         raise SystemExit(f"no prompts found in {args.text_jsonl}")
     order = rng.permutation(len(prompts))
     picks = [prompts[order[i % len(prompts)]] for i in range(args.num_requests)]
-    lengths = sample_lengths(args.lengths_trace, args.num_requests, rng, args.max_total_tokens)
+    lengths = sample_lengths(
+        args.lengths_trace, args.num_requests, rng, args.max_total_tokens
+    )
     arrivals = poisson_arrivals(args.num_requests, args.qps, rng)
     return [
         WorkloadRequest(
@@ -103,7 +107,9 @@ def build_text(args, rng):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("kind", choices=["synthetic", "text"])
     p.add_argument("--out", required=True)
     p.add_argument("--qps", type=float, required=True)
@@ -120,19 +126,32 @@ def main(argv=None):
     p.add_argument("--min-token-id", type=int, default=100)
     p.add_argument("--text-jsonl")
     p.add_argument("--text-field", default="prompt")
-    p.add_argument("--output-tokens", type=int, default=None, help="fixed output length for text prompts")
-    p.add_argument("--stop-at-eos", action="store_true", help="let text requests end at EOS")
+    p.add_argument(
+        "--output-tokens",
+        type=int,
+        default=None,
+        help="fixed output length for text prompts",
+    )
+    p.add_argument(
+        "--stop-at-eos", action="store_true", help="let text requests end at EOS"
+    )
     args = p.parse_args(argv)
 
     if args.kind == "text" and not args.text_jsonl:
         p.error("text workloads need --text-jsonl")
 
     rng = np.random.default_rng(args.seed)
-    requests = build_synthetic(args, rng) if args.kind == "synthetic" else build_text(args, rng)
+    requests = (
+        build_synthetic(args, rng)
+        if args.kind == "synthetic"
+        else build_text(args, rng)
+    )
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     write_workload(args.out, requests)
     span = requests[-1].arrival_s
-    print(f"wrote {len(requests)} requests over {span:.1f}s ({len(requests) / max(span, 1e-9):.2f} req/s) to {args.out}")
+    print(
+        f"wrote {len(requests)} requests over {span:.1f}s ({len(requests) / max(span, 1e-9):.2f} req/s) to {args.out}"
+    )
 
 
 if __name__ == "__main__":

@@ -62,7 +62,12 @@ def test_parse_spec_counters():
 
 def test_counter_delta():
     after = SpecCounters.from_samples(parse_prometheus(PROM))
-    before = SpecCounters(num_drafts=40, num_draft_tokens=160, num_accepted_tokens=80, accepted_per_pos={0: 30})
+    before = SpecCounters(
+        num_drafts=40,
+        num_draft_tokens=160,
+        num_accepted_tokens=80,
+        accepted_per_pos={0: 30},
+    )
     d = after.minus(before)
     assert (d.num_drafts, d.num_draft_tokens, d.num_accepted_tokens) == (60, 240, 100)
     assert d.accepted_per_pos[0] == 50 and d.accepted_per_pos[3] == 10
@@ -81,8 +86,21 @@ def test_tpot_and_mape():
 
 def test_synthetic_workload(tmp_path):
     out = tmp_path / "w.jsonl"
-    make_workload.main(["synthetic", "--qps", "5", "--num-requests", "50", "--seed", "3",
-                        "--max-total-tokens", "2048", "--out", str(out)])
+    make_workload.main(
+        [
+            "synthetic",
+            "--qps",
+            "5",
+            "--num-requests",
+            "50",
+            "--seed",
+            "3",
+            "--max-total-tokens",
+            "2048",
+            "--out",
+            str(out),
+        ]
+    )
     w = read_workload(str(out))
     assert len(w) == 50
     arrivals = [r.arrival_s for r in w]
@@ -91,8 +109,21 @@ def test_synthetic_workload(tmp_path):
         assert len(r.prompt_token_ids) + r.max_tokens <= 2048
         assert min(r.prompt_token_ids) >= 100 and max(r.prompt_token_ids) < 32000
     out2 = tmp_path / "w2.jsonl"
-    make_workload.main(["synthetic", "--qps", "5", "--num-requests", "50", "--seed", "3",
-                        "--max-total-tokens", "2048", "--out", str(out2)])
+    make_workload.main(
+        [
+            "synthetic",
+            "--qps",
+            "5",
+            "--num-requests",
+            "50",
+            "--seed",
+            "3",
+            "--max-total-tokens",
+            "2048",
+            "--out",
+            str(out2),
+        ]
+    )
     assert out.read_text() == out2.read_text()
 
 
@@ -126,18 +157,54 @@ def fake_server():
 @pytest.fixture
 def replayed(tmp_path, fake_server):
     workload = tmp_path / "w.jsonl"
-    make_workload.main(["synthetic", "--qps", "40", "--num-requests", "30", "--seed", "0",
-                        "--max-total-tokens", "1024", "--out", str(workload)])
+    make_workload.main(
+        [
+            "synthetic",
+            "--qps",
+            "40",
+            "--num-requests",
+            "30",
+            "--seed",
+            "0",
+            "--max-total-tokens",
+            "1024",
+            "--out",
+            str(workload),
+        ]
+    )
     run_dir = tmp_path / "run"
-    replay.main(["--workload", str(workload), "--out-dir", str(run_dir), "--base-url", fake_server,
-                 "--model", "fake", "--start-delay", "0.2", "--settle", "0.2"])
+    replay.main(
+        [
+            "--workload",
+            str(workload),
+            "--out-dir",
+            str(run_dir),
+            "--base-url",
+            fake_server,
+            "--model",
+            "fake",
+            "--start-delay",
+            "0.2",
+            "--settle",
+            "0.2",
+        ]
+    )
     experiment = tmp_path / "exp.json"
-    experiment.write_text(json.dumps({
-        "name": "fake", "model": "meta-llama/Llama-2-7b-hf", "device": "a100",
-        "tensor_parallel_size": 1, "max_model_len": 4096,
-        "max_num_batched_tokens": 2048, "max_num_seqs": 128, "block_size": 16,
-        "speculative_config": {"method": "ngram", "num_speculative_tokens": 4},
-    }))
+    experiment.write_text(
+        json.dumps(
+            {
+                "name": "fake",
+                "model": "meta-llama/Llama-2-7b-hf",
+                "device": "a100",
+                "tensor_parallel_size": 1,
+                "max_model_len": 4096,
+                "max_num_batched_tokens": 2048,
+                "max_num_seqs": 128,
+                "block_size": 16,
+                "speculative_config": {"method": "ngram", "num_speculative_tokens": 4},
+            }
+        )
+    )
     return tmp_path, workload, run_dir, experiment
 
 
@@ -158,21 +225,38 @@ def test_replay_records_every_request(replayed):
 
 def test_chunks_carry_multiple_tokens(replayed):
     _, _, run_dir, _ = replayed
-    sizes = [n for line in open(run_dir / "chunks.jsonl") for _, n in json.loads(line)["chunks"]]
+    sizes = [
+        n
+        for line in open(run_dir / "chunks.jsonl")
+        for _, n in json.loads(line)["chunks"]
+    ]
     assert max(sizes) > 1 and sum(sizes) > 0
 
 
 def test_calibration_recovers_acceptance(replayed):
     tmp_path, _, run_dir, experiment = replayed
     out = tmp_path / "sim_inputs"
-    build_sim_inputs.main(["--experiment", str(experiment), "--run-dir", str(run_dir), "--out-dir", str(out)])
+    build_sim_inputs.main(
+        [
+            "--experiment",
+            str(experiment),
+            "--run-dir",
+            str(run_dir),
+            "--out-dir",
+            str(out),
+        ]
+    )
     cal = json.loads((out / "calibration.json").read_text())
     # the fake engine accepts each position with 0.7 independently
     assert np.mean(cal["acceptance_rate_per_position"]) == pytest.approx(0.7, abs=0.08)
     # the fake engine always proposes; end-of-request capping only nudges this
     assert cal["proposal_probability"] > 0.9
     trace = pd.read_csv(out / "trace.csv")
-    assert list(trace.columns) == ["arrived_at", "num_prefill_tokens", "num_decode_tokens"]
+    assert list(trace.columns) == [
+        "arrived_at",
+        "num_prefill_tokens",
+        "num_decode_tokens",
+    ]
     assert trace["arrived_at"].is_monotonic_increasing
     args = json.loads((out / "sim_args.json").read_text())
     assert "--speculative_decoding_config_proposal_probability" in args
@@ -182,40 +266,96 @@ def test_calibration_recovers_acceptance(replayed):
 def test_report_is_zero_error_when_sim_matches(replayed):
     tmp_path, _, run_dir, experiment = replayed
     inputs = tmp_path / "sim_inputs"
-    build_sim_inputs.main(["--experiment", str(experiment), "--run-dir", str(run_dir), "--out-dir", str(inputs)])
+    build_sim_inputs.main(
+        [
+            "--experiment",
+            str(experiment),
+            "--run-dir",
+            str(run_dir),
+            "--out-dir",
+            str(inputs),
+        ]
+    )
     measured = report.measured_frame(str(run_dir), str(inputs))
     # a "simulation" that reproduces the measurement exactly
     result = tmp_path / "sim" / "perfect" / "result"
     result.mkdir(parents=True)
-    pd.DataFrame({
-        "Request Id": measured["sim_request_id"],
-        "prefill_e2e_time": measured["ttft"],
-        "request_e2e_time": measured["e2e"],
-        "request_num_decode_tokens": measured["completion_tokens"],
-    }).to_csv(result / "request_metrics.csv", index=False)
+    pd.DataFrame(
+        {
+            "Request Id": measured["sim_request_id"],
+            "prefill_e2e_time": measured["ttft"],
+            "request_e2e_time": measured["e2e"],
+            "request_num_decode_tokens": measured["completion_tokens"],
+        }
+    ).to_csv(result / "request_metrics.csv", index=False)
     (tmp_path / "sim" / "perfect" / "variant.json").write_text(
         json.dumps({"name": "perfect", "extra_args": [], "result_dir": str(result)})
     )
-    report.main(["--run-dir", str(run_dir), "--sim-inputs", str(inputs),
-                 "--sim-dir", str(tmp_path / "sim"), "--out-dir", str(tmp_path / "report")])
-    r = json.loads((tmp_path / "report" / "report.json").read_text())["results"]["perfect"]
+    report.main(
+        [
+            "--run-dir",
+            str(run_dir),
+            "--sim-inputs",
+            str(inputs),
+            "--sim-dir",
+            str(tmp_path / "sim"),
+            "--out-dir",
+            str(tmp_path / "report"),
+        ]
+    )
+    r = json.loads((tmp_path / "report" / "report.json").read_text())["results"][
+        "perfect"
+    ]
     for metric in ("ttft", "tpot", "e2e"):
         assert r[metric]["mape"] == pytest.approx(0, abs=1e-9)
     # sent_s vs trace arrival differ only by the shift to t=0
     assert r["output_throughput_tok_s"]["rel_error"] == pytest.approx(0, abs=1e-6)
 
 
-@pytest.mark.skipif(not os.environ.get("VIDUR_CACHE_DIR"), reason="needs a trained Vidur cache")
+@pytest.mark.skipif(
+    not os.environ.get("VIDUR_CACHE_DIR"), reason="needs a trained Vidur cache"
+)
 def test_end_to_end_with_vidur(replayed):
     tmp_path, _, run_dir, experiment = replayed
     inputs, sim, rep = tmp_path / "sim_inputs", tmp_path / "sim", tmp_path / "report"
-    build_sim_inputs.main(["--experiment", str(experiment), "--run-dir", str(run_dir), "--out-dir", str(inputs)])
-    subprocess.run(
-        [sys.executable, os.path.join(VALIDATION, "run_sim.py"), "--sim-inputs", str(inputs),
-         "--out-dir", str(sim), "--cache-dir", os.environ["VIDUR_CACHE_DIR"], "--weights", "0.5"],
-        cwd=REPO, check=True,
+    build_sim_inputs.main(
+        [
+            "--experiment",
+            str(experiment),
+            "--run-dir",
+            str(run_dir),
+            "--out-dir",
+            str(inputs),
+        ]
     )
-    report.main(["--run-dir", str(run_dir), "--sim-inputs", str(inputs), "--sim-dir", str(sim), "--out-dir", str(rep)])
+    subprocess.run(
+        [
+            sys.executable,
+            os.path.join(VALIDATION, "run_sim.py"),
+            "--sim-inputs",
+            str(inputs),
+            "--out-dir",
+            str(sim),
+            "--cache-dir",
+            os.environ["VIDUR_CACHE_DIR"],
+            "--weights",
+            "0.5",
+        ],
+        cwd=REPO,
+        check=True,
+    )
+    report.main(
+        [
+            "--run-dir",
+            str(run_dir),
+            "--sim-inputs",
+            str(inputs),
+            "--sim-dir",
+            str(sim),
+            "--out-dir",
+            str(rep),
+        ]
+    )
     results = json.loads((rep / "report.json").read_text())["results"]
     assert set(results) == {"decode_shared_kv", "decode_per_token", "interpolated_w0.5"}
     for r in results.values():
