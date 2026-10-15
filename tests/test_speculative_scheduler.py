@@ -190,3 +190,15 @@ def test_no_proposals_reduces_to_plain_decoding():
         make_scheduler(spec(k=4, proposal_probability=0.0)), make_requests(sizes)
     )
     assert [b.num_tokens for b in never] == [b.num_tokens for b in base]
+
+
+def test_float_token_counts_from_trace_replay():
+    # pandas iterrows upcasts trace rows to float, so requests can carry 395.0
+    requests = make_requests([(395.0, 112.0), (64.0, 30.0)])
+    run_to_completion(
+        make_scheduler(
+            spec(acceptance_model="per_position", acceptance_rate_per_position=[0.8, 0.6])
+        ),
+        requests,
+    )
+    assert all(r.completed for r in requests)

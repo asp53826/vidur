@@ -105,6 +105,7 @@ class AcceptanceSampler:
 
     def conditional_probs(self, request_id: int, k: int) -> List[float]:
         """Conditional acceptance probabilities for positions 1..k."""
+        k = int(k)
         model = self._config.acceptance_model
         if model == "constant":
             return [self._config.acceptance_rate] * k
@@ -122,6 +123,8 @@ class AcceptanceSampler:
         below the configured k near the end of a request or when the token
         budget is tight).
         """
+        # trace-replay requests carry float token counts (pandas upcasts rows)
+        k, max_tokens = int(k), int(max_tokens)
         if max_tokens < 1:
             raise ValueError("a verify step always emits at least one token")
         if k == 0:
