@@ -24,6 +24,7 @@ class ExecutionTime(BaseEntity):
         prepare_inputs_e2e_time: float,
         process_model_outputs_time: float,
         ray_comm_time: float,
+        speculative_proposer_time: float = 0.0,
     ) -> None:
         self._id = ExecutionTime.generate_id()
 
@@ -55,6 +56,9 @@ class ExecutionTime(BaseEntity):
         self._prepare_inputs_e2e_time = prepare_inputs_e2e_time
         self._process_model_outputs_time = process_model_outputs_time
         self._ray_comm_time = ray_comm_time
+        # ms spent producing proposals for the next verify step (draft model
+        # forward passes, or CPU n-gram lookup); 0 without speculative decoding
+        self._speculative_proposer_time = speculative_proposer_time
 
     def _get_mlp_layer_execution_time(self) -> float:
         return (
@@ -166,6 +170,10 @@ class ExecutionTime(BaseEntity):
         return self._ray_comm_time
 
     @property
+    def speculative_proposer_time(self) -> float:
+        return self._speculative_proposer_time
+
+    @property
     def mlp_norm_time(self) -> float:
         return self._mlp_norm_time
 
@@ -196,4 +204,7 @@ class ExecutionTime(BaseEntity):
     @property
     def total_time(self) -> float:
         # return in seconds
-        return self.model_time + self._get_cpu_overhead() * 1e-3
+        return (
+            self.model_time
+            + (self._get_cpu_overhead() + self._speculative_proposer_time) * 1e-3
+        )

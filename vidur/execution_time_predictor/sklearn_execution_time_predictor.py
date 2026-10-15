@@ -18,6 +18,10 @@ from vidur.config import (
     MetricsConfig,
     ReplicaConfig,
 )
+from vidur.execution_time_predictor.speculative_proxy import (
+    ProxyBatch,
+    ProxyRequest,
+)
 from vidur.entities import Batch
 from vidur.execution_time_predictor.base_execution_time_predictor import (
     BaseExecutionTimePredictor,
@@ -83,6 +87,35 @@ class SklearnExecutionTimePredictor(BaseExecutionTimePredictor):
 
         self._models = self._train_models()
         self._predictions = self._predict_from_models()
+
+        self._spec_config = self._replica_config.speculative_decoding_config
+        self._draft_predictor = None
+        if self._spec_config.enabled and self._spec_config.proposer == "draft_model":
+            self._draft_predictor = self._create_draft_predictor(
+                predictor_config, replica_scheduler_config, metrics_config
+            )
+
+    def _create_draft_predictor(
+        self,
+        predictor_config: BaseExecutionTimePredictorConfig,
+        replica_scheduler_config: BaseReplicaSchedulerConfig,
+        metrics_config: MetricsConfig,
+    ) -> "SklearnExecutionTimePredictor":
+        """Same estimator type, trained on the draft model's profiling data."""
+        draft_replica_config = ReplicaConfig(
+            model_name=self._spec_config.draft_model_name,
+            tensor_parallel_size=self._spec_config.draft_tensor_parallel_size,
+            num_pipeline_stages=1,
+            device=self._replica_config.device,
+            network_device=self._replica_config.network_device,
+            memory_margin_fraction=self._replica_config.memory_margin_fraction,
+        )
+        return type(self)(
+            predictor_config=predictor_config,
+            replica_config=draft_replica_config,
+            replica_scheduler_config=replica_scheduler_config,
+            metrics_config=metrics_config,
+        )
 
     def _get_input_files(self) -> Tuple[str, str, str, str, str]:
         input_files = [
@@ -841,13 +874,104 @@ class SklearnExecutionTimePredictor(BaseExecutionTimePredictor):
         if decode_batch_size == 0:
             return 0
 
-        return self._predictions["attn_decode"][
-            (decode_batch_size, decode_avg_kv_cache_size)
-        ] * (
-            1
-            + self._attention_decode_batching_overhead_fraction
-            * int(decode_batch_size > 1)
+        lower = self._predict_decode_attention(
+            decode_batch_size, decode_avg_kv_cache_size
         )
+        if not self._spec_config.enabled:
+            return lower
+
+        num_query_tokens = sum(
+            n
+            for request, n in zip(batch.requests, batch.num_tokens)
+            if request._is_prefill_complete
+        )
+        if num_query_tokens == decode_batch_size:
+            return lower
+
+        # A verify step runs k + 1 query tokens per sequence against that
+        # sequence's KV. Two bounds bracket it: KV is read once and the extra
+        # queries ride along for free (memory-bound kernel), or every query
+        # token costs a full decode query. Validation decides where real
+        # kernels sit; see docs/speculative_decoding.md.
+        model = self._spec_config.verify_attention_model
+        if model == "decode_shared_kv":
+            return lower
+        upper = self._predict_decode_attention(
+            num_query_tokens, decode_avg_kv_cache_size
+        )
+        if model == "decode_per_token":
+            return upper
+        return lower + self._spec_config.verify_attention_weight * (upper - lower)
+
+    def _predict_decode_attention(self, batch_size: int, kv_cache_size: int) -> float:
+        """Decode attention time, extrapolated linearly past the profiled batch range."""
+        max_batch_size = self._config.prediction_max_batch_size
+        if batch_size <= max_batch_size:
+            time = self._predictions["attn_decode"][(batch_size, kv_cache_size)]
+        else:
+            time = (
+                self._predictions["attn_decode"][(max_batch_size, kv_cache_size)]
+                * batch_size
+                / max_batch_size
+            )
+        return time * (
+            1 + self._attention_decode_batching_overhead_fraction * int(batch_size > 1)
+        )
+
+    def _get_speculative_proposer_time(self, batch: Batch) -> float:
+        if not self._spec_config.enabled:
+            return 0.0
+
+        # Sequences that decode next step need proposals: those already
+        # decoding, and those whose prefill finishes in this batch.
+        drafting = [
+            (request, n)
+            for request, n in zip(batch.requests, batch.num_tokens)
+            if request._is_prefill_complete
+            or request.num_processed_tokens + n >= request.num_prefill_tokens
+        ]
+        if not drafting:
+            return 0.0
+
+        if self._spec_config.proposer in ("ngram", "fixed"):
+            return (
+                self._spec_config.proposer_fixed_overhead_ms
+                + self._spec_config.proposer_overhead_ms_per_seq * len(drafting)
+            )
+
+        return self._get_draft_model_time(batch, drafting)
+
+    def _get_draft_model_time(self, batch: Batch, drafting) -> float:
+        """k draft forward passes, in ms.
+
+        Pass 1 mirrors the target's input (prefill chunks included, so the
+        draft's KV stays in sync). Passes 2..k each add one token to every
+        drafting sequence.
+        """
+        draft = self._draft_predictor
+        k = self._spec_config.num_speculative_tokens
+
+        first_pass = ProxyBatch(
+            [ProxyRequest.from_request(r) for r in batch.requests],
+            list(batch.num_tokens),
+        )
+        total_ms = draft.get_execution_time(first_pass, 0).model_time_ms
+
+        max_kv = self._config.prediction_max_tokens_per_request - 1
+        for step in range(1, k):
+            requests = [
+                ProxyRequest(
+                    is_prefill_complete=True,
+                    num_processed_tokens=min(
+                        max_kv, r.num_processed_tokens + n + step - 1
+                    ),
+                )
+                for r, n in drafting
+            ]
+            step_batch = ProxyBatch(requests, [1] * len(requests))
+            total_ms += draft.get_execution_time(step_batch, 0).model_time_ms
+
+        return total_ms
 
     def _get_attention_prefill_execution_time(self, batch: Batch) -> float:
         prefill_params = self._get_batch_prefill_attention_params(batch)

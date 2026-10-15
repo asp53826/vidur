@@ -65,7 +65,12 @@ class BaseExecutionTimePredictor(ABC):
             self._get_prepare_inputs_e2e_time(batch),
             self._get_process_model_outputs_time(batch),
             self._get_ray_comm_time(batch),
+            self._get_speculative_proposer_time(batch),
         )
+
+    def _get_speculative_proposer_time(self, batch: Batch) -> float:
+        """ms to produce proposals for the next verify step. 0 by default."""
+        return 0.0
 
     @abstractmethod
     def _get_attention_layer_pre_proj_execution_time(self, batch: Batch) -> float:
